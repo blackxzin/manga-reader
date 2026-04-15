@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MangaLivre - Mangás Traduzidos Grátis</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- NAVBAR -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <a class="logo" onclick="navigate('home')">
+                <span class="logo-icon">&#128218;</span>
+                <span class="logo-text">Manga<span class="highlight">Livre</span></span>
+            </a>
+            <div class="search-box">
+                <input type="text" id="searchInput" placeholder="Buscar mangás, autores, gêneros..." autocomplete="off">
+                <span class="search-icon">&#128269;</span>
+                <div class="search-dropdown" id="searchDropdown"></div>
+            </div>
+            <ul class="nav-links">
+                <li><a class="active" data-page="home" onclick="navigate('home')">Início</a></li>
+                <li><a data-page="popular" onclick="navigate('popular')">Popular</a></li>
+                <li><a data-page="recent" onclick="navigate('recent')">Recentes</a></li>
+                <li><a data-page="favorites" onclick="navigate('favorites')">
+                    <span>&#9825;</span> Favoritos
+                </a></li>
+            </ul>
+            <div class="theme-toggle" onclick="toggleTheme()">
+                <span class="theme-icon" id="themeIcon">&#9789;</span>
+            </div>
+            <div class="mobile-menu-btn" onclick="toggleMobileMenu()">&#9776;</div>
+        </div>
+    </nav>
+
+    <!-- MOBILE MENU -->
+    <div class="mobile-menu" id="mobileMenu">
+        <a onclick="navigate('home'); closeMobileMenu()">Início</a>
+        <a onclick="navigate('popular'); closeMobileMenu()">Popular</a>
+        <a onclick="navigate('recent'); closeMobileMenu()">Recentes</a>
+        <a onclick="navigate('favorites'); closeMobileMenu()">Favoritos</a>
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <main id="mainContent">
+        <!-- HOME -->
+        <section class="page active" id="page-home">
+            <div class="hero">
+                <div class="hero-content">
+                    <h1>Leia Mangás Traduzidos <span class="accent-text">Grátis</span></h1>
+                    <p>Milhares de títulos em português, atualizados diariamente.</p>
+                    <div class="hero-stats">
+                        <div class="stat"><strong id="totalMangas">0</strong><span>Títulos</span></div>
+                        <div class="stat"><strong id="totalChapters">0</strong><span>Capítulos</span></div>
+                        <div class="stat"><strong>PT-BR</strong><span>Traduzido</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="container">
+                <div class="filter-bar">
+                    <div class="filter-bar-header">
+                        <h3>Gêneros</h3>
+                        <button class="filter-clear" onclick="filterGenre(null)">Limpar</button>
+                    </div>
+                    <div class="genre-filters" id="genreFilters"></div>
+                </div>
+
+                <div class="section-title">
+                    <h2>&#9733; Destaques</h2>
+                    <div class="carousel-nav">
+                        <button class="carousel-btn" onclick="scrollCarousel(-1)">&#8249;</button>
+                        <button class="carousel-btn" onclick="scrollCarousel(1)">&#8250;</button>
+                    </div>
+                </div>
+                <div class="featured-carousel" id="featuredCarousel"></div>
+
+                <div class="section-title">
+                    <h2>&#9200; Últimas Atualizações</h2>
+                </div>
+                <div class="manga-grid" id="latestGrid"></div>
+
+                <div class="section-title">
+                    <h2>&#128218; Catálogo Completo</h2>
+                </div>
+                <div class="sort-bar">
+                    <span>Ordenar por:</span>
+                    <div class="sort-options">
+                        <button class="sort-btn active" data-sort="name" onclick="handleSort('name')">Nome</button>
+                        <button class="sort-btn" data-sort="rating" onclick="handleSort('rating')">Avaliação</button>
+                        <button class="sort-btn" data-sort="views" onclick="handleSort('views')">Popular</button>
+                        <button class="sort-btn" data-sort="latest" onclick="handleSort('latest')">Recente</button>
+                    </div>
+                </div>
+                <div class="manga-grid" id="allGrid"></div>
+            </div>
+        </section>
+
+        <!-- POPULAR -->
+        <section class="page" id="page-popular">
+            <div class="container">
+                <h1 class="page-title">&#128293; Ranking Popular</h1>
+                <div class="ranked-list" id="popularList"></div>
+            </div>
+        </section>
+
+        <!-- RECENT -->
+        <section class="page" id="page-recent">
+            <div class="container">
+                <h1 class="page-title">&#128197; Capítulos Recentes</h1>
+                <div class="recent-list" id="recentList"></div>
+            </div>
+        </section>
+
+        <!-- FAVORITES -->
+        <section class="page" id="page-favorites">
+            <div class="container">
+                <h1 class="page-title">&#10084; Meus Favoritos</h1>
+                <div class="manga-grid" id="favoritesGrid"></div>
+                <div class="empty-state" id="emptyFavorites">
+                    <div class="empty-icon">&#10084;</div>
+                    <h3>Nenhum favorito ainda</h3>
+                    <p>Clique no &#10084; de um mangá para adicionar aos favoritos!</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- SEARCH RESULTS -->
+        <section class="page" id="page-search">
+            <div class="container">
+                <h1 class="page-title">Resultados para "<span id="searchQuery"></span>"</h1>
+                <p class="search-count" id="searchCount"></p>
+                <div class="manga-grid" id="searchGrid"></div>
+                <div class="empty-state" id="emptySearch">
+                    <div class="empty-icon">&#128269;</div>
+                    <h3>Nenhum resultado encontrado</h3>
+                    <p>Tente buscar por outro título, autor ou gênero.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- MANGA DETAIL -->
+        <section class="page" id="page-detail">
+            <div class="container">
+                <button class="back-btn" onclick="goBack()">&#8592; Voltar</button>
+                <div class="manga-detail" id="mangaDetail"></div>
+            </div>
+        </section>
+
+        <!-- READER -->
+        <section class="page" id="page-reader">
+            <div class="reader-header">
+                <button class="back-btn" onclick="goBack()">&#8592; Voltar</button>
+                <div class="reader-info">
+                    <span id="readerTitle"></span>
+                </div>
+                <div class="reader-controls">
+                    <select id="chapterSelect" onchange="jumpToChapter(this.value)"></select>
+                    <button class="reader-nav-btn" id="prevChapterBtn" onclick="prevChapter()">&#8592;</button>
+                    <button class="reader-nav-btn" id="nextChapterBtn" onclick="nextChapter()">&#8594;</button>
+                </div>
+            </div>
+            <div class="reader-container" id="readerContainer"></div>
+            <div class="reader-footer">
+                <div class="container">
+                    <div class="reader-nav-buttons">
+                        <button class="btn-primary" id="readerPrevBtn" onclick="prevChapter()">&#8592; Capítulo Anterior</button>
+                        <button class="btn-primary" id="readerNextBtn" onclick="nextChapter()">Próximo Capítulo &#8594;</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <span class="logo-text">Manga<span class="highlight">Livre</span></span>
+                    <p>O melhor site para ler mangás traduzidos em português.</p>
+                </div>
+                <div class="footer-links">
+                    <a onclick="navigate('home')">Início</a>
+                    <a onclick="navigate('popular')">Popular</a>
+                    <a onclick="navigate('recent')">Recentes</a>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>MangaLivre &copy; 2026 - Projeto demonstrativo. Todos os mangás são traduções feitas por fãs.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="data.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
