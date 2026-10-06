@@ -45,7 +45,7 @@ const MANGA_DATA = [
     id: 4,
     title: "Solo Leveling",
     altTitle: "나 혼자만 레벨업",
-    cover: "https://cdn.myanimelist.net/images/manga/3/222363l.jpg",
+    cover: "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx105398-b673Vt5ZSuz3.jpg",
     author: "Chugong",
     artist: "DUBU (REDICE Studio)",
     status: "Concluído",
@@ -59,7 +59,7 @@ const MANGA_DATA = [
     id: 5,
     title: "Spy x Family",
     altTitle: "SPY×FAMILY",
-    cover: "https://cdn.myanimelist.net/images/manga/2/258259l.jpg",
+    cover: "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx108556-NHjkz0BNJhLx.jpg",
     author: "Tatsuya Endo",
     artist: "Tatsuya Endo",
     status: "Em lançamento",
@@ -73,7 +73,7 @@ const MANGA_DATA = [
     id: 6,
     title: "My Hero Academia",
     altTitle: "僕のヒーローアカデミア",
-    cover: "https://cdn.myanimelist.net/images/manga/1/209360l.jpg",
+    cover: "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx85486-INqnYx8gL3eX.jpg",
     author: "Kohei Horikoshi",
     artist: "Kohei Horikoshi",
     status: "Concluído",
@@ -87,7 +87,7 @@ const MANGA_DATA = [
     id: 7,
     title: "Blue Lock",
     altTitle: "ブルーロック",
-    cover: "https://cdn.myanimelist.net/images/manga/3/232617l.jpg",
+    cover: "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx106130-yPNeuSu75ey1.jpg",
     author: "Muneyuki Kaneshiro",
     artist: "Yusuke Nomura",
     status: "Em lançamento",
@@ -115,7 +115,7 @@ const MANGA_DATA = [
     id: 9,
     title: "Kaiju No. 8",
     altTitle: "怪獣8号",
-    cover: "https://cdn.myanimelist.net/images/manga/1/252192l.jpg",
+    cover: "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx120760-MtXvMgujLBpe.jpg",
     author: "Naoya Matsumoto",
     artist: "Naoya Matsumoto",
     status: "Em lançamento",
@@ -157,7 +157,7 @@ const MANGA_DATA = [
     id: 12,
     title: "One Punch Man",
     altTitle: "ワンパンマン",
-    cover: "https://cdn.myanimelist.net/images/manga/1/219586l.jpg",
+    cover: "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx74347-sZpmNJ5xLwRK.jpg",
     author: "ONE",
     artist: "Yusuke Murata",
     status: "Em lançamento",
@@ -171,7 +171,7 @@ const MANGA_DATA = [
     id: 13,
     title: "Omniscient Reader's Viewpoint",
     altTitle: "전지적 독자 시점",
-    cover: "https://cdn.myanimelist.net/images/manga/1/258245l.jpg",
+    cover: "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx119257-Pi21aq3ey9GG.jpg",
     author: "Sing Shong",
     artist: "Sleepy-C",
     status: "Em lançamento",
@@ -185,7 +185,7 @@ const MANGA_DATA = [
     id: 14,
     title: "Dragon Ball Super",
     altTitle: "ドラゴンボール超",
-    cover: "https://cdn.myanimelist.net/images/manga/3/209463l.jpg",
+    cover: "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx86508-QSahE7mTFEXl.png",
     author: "Akira Toriyama",
     artist: "Toyotarou",
     status: "Em lançamento",
@@ -199,7 +199,7 @@ const MANGA_DATA = [
     id: 15,
     title: "Dandadan",
     altTitle: "ダンダダン",
-    cover: "https://cdn.myanimelist.net/images/manga/1/254638l.jpg",
+    cover: "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx132029-prGF4gePdSKv.jpg",
     author: "Yukinobu Tatsu",
     artist: "Yukinobu Tatsu",
     status: "Em lançamento",
@@ -213,7 +213,7 @@ const MANGA_DATA = [
     id: 16,
     title: "Tokyo Revengers",
     altTitle: "東京リベンジャーズ",
-    cover: "https://cdn.myanimelist.net/images/manga/3/222548l.jpg",
+    cover: "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx102988-OoVJxQCH6fbR.jpg",
     author: "Ken Wakui",
     artist: "Ken Wakui",
     status: "Concluído",
@@ -227,7 +227,7 @@ const MANGA_DATA = [
     id: 17,
     title: "Sakamoto Days",
     altTitle: "サカモトデイズ",
-    cover: "https://cdn.myanimelist.net/images/manga/1/247196l.jpg",
+    cover: "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx125828-p78Z8SflkfmO.jpg",
     author: "Yuto Suzuki",
     artist: "Yuto Suzuki",
     status: "Em lançamento",
@@ -241,7 +241,7 @@ const MANGA_DATA = [
     id: 18,
     title: "Bleach: TYBW",
     altTitle: "BLEACH 千年血戦篇",
-    cover: "https://cdn.myanimelist.net/images/manga/2/179453l.jpg",
+    cover: "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx30012-1epmVfTSv2rr.png",
     author: "Tite Kubo",
     artist: "Tite Kubo",
     status: "Em lançamento",
@@ -253,51 +253,30 @@ const MANGA_DATA = [
   }
 ];
 
-// Generate chapters for each manga
+// Generate chapters for each manga: [total chapters, days since the latest one]
+var CHAPTER_INFO = {
+  1: [1120, 0], 2: [271, 25], 3: [195, 4], 4: [200, 107], 5: [107, 7], 6: [430, 13],
+  7: [290, 2], 8: [205, 150], 9: [120, 6], 10: [139, 237], 11: [700, 308], 12: [203, 9],
+  13: [185, 3], 14: [105, 15], 15: [158, 1], 16: [278, 191], 17: [175, 5], 18: [95, 8]
+};
+
 MANGA_DATA.forEach(function(manga) {
-  var totalChapters;
-  var lastDate;
-
-  switch(manga.id) {
-    case 1: totalChapters = 1120; lastDate = "2026-04-14"; break;
-    case 2: totalChapters = 271; lastDate = "2026-03-20"; break;
-    case 3: totalChapters = 195; lastDate = "2026-04-10"; break;
-    case 4: totalChapters = 200; lastDate = "2025-12-28"; break;
-    case 5: totalChapters = 107; lastDate = "2026-04-07"; break;
-    case 6: totalChapters = 430; lastDate = "2026-04-01"; break;
-    case 7: totalChapters = 290; lastDate = "2026-04-12"; break;
-    case 8: totalChapters = 205; lastDate = "2025-11-15"; break;
-    case 9: totalChapters = 120; lastDate = "2026-04-08"; break;
-    case 10: totalChapters = 139; lastDate = "2025-08-20"; break;
-    case 11: totalChapters = 700; lastDate = "2025-06-10"; break;
-    case 12: totalChapters = 203; lastDate = "2026-04-05"; break;
-    case 13: totalChapters = 185; lastDate = "2026-04-11"; break;
-    case 14: totalChapters = 105; lastDate = "2026-03-30"; break;
-    case 15: totalChapters = 158; lastDate = "2026-04-13"; break;
-    case 16: totalChapters = 278; lastDate = "2025-10-05"; break;
-    case 17: totalChapters = 175; lastDate = "2026-04-09"; break;
-    case 18: totalChapters = 95; lastDate = "2026-04-06"; break;
-    default: totalChapters = 100; lastDate = "2026-04-01";
-  }
-
-  manga.chapters = generateChapters(manga.title, totalChapters, lastDate);
+  var info = CHAPTER_INFO[manga.id] || [100, 14];
+  manga.chapters = generateChapters(info[0], info[1]);
 });
 
-function generateChapters(title, totalChapters, lastDate) {
+// Weekly releases counted back from today. Returned newest first.
+function generateChapters(totalChapters, lastDaysAgo) {
   var chapters = [];
-  var baseDate = new Date(lastDate + 'T12:00:00');
+  var today = new Date();
+  today.setHours(12, 0, 0, 0);
 
-  for (var i = 1; i <= totalChapters; i++) {
-    var daysAgo = Math.floor((totalChapters - i) * 0.8);
-    var d = new Date(baseDate.getTime() - daysAgo * 24 * 60 * 60 * 1000);
-    chapters.push({
-      number: i,
-      title: title + ' - Capítulo ' + i,
-      date: d.toISOString().split('T')[0]
-    });
+  for (var i = totalChapters; i >= 1; i--) {
+    var daysAgo = lastDaysAgo + (totalChapters - i) * 7;
+    var d = new Date(today.getTime() - daysAgo * 24 * 60 * 60 * 1000);
+    chapters.push({ number: i, date: d.toISOString().split('T')[0] });
   }
-  // Return newest first (descending order)
-  return chapters.reverse();
+  return chapters;
 }
 
 // Collect all unique genres
@@ -311,4 +290,4 @@ MANGA_DATA.forEach(function(m) {
     }
   });
 });
-ALL_GENRES.sort();
+ALL_GENRES.sort(function(a, b) { return a.localeCompare(b, "pt-BR"); });

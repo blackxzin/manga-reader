@@ -1,244 +1,337 @@
+// ===== STORAGE =====
+function load(key, fallback) {
+    try {
+        var v = JSON.parse(localStorage.getItem(key));
+        return v == null ? fallback : v;
+    } catch (e) { return fallback; }
+}
+
+function save(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {}
+}
+
 // ===== STATE =====
 var state = {
-    currentPage: 'home',
     selectedGenre: null,
     sortBy: 'name',
-    favorites: JSON.parse(localStorage.getItem('mangaFavs') || '[]'),
-    navHistory: [],
+    favorites: load('mangaFavs', []),
+    progress: load('mangaProgress', {}), // { [mangaId]: { ch: last opened, t: timestamp, read: [numbers] } }
     currentManga: null,
     currentChapter: null,
-    chaptersExpanded: true,
+    chapterOrderDesc: true,
+    navCount: 0,
+    replacing: false,
     searchTimeout: null
 };
 
+var HEART = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 4.5 6.7 4.5c2.1 0 3.6 1.2 5.3 3.1 1.7-1.9 3.2-3.1 5.3-3.1 3.7 0 5.8 3.9 4.3 7.3C19.5 16.4 12 21 12 21z"/></svg>';
+
 // ===== UTILS =====
+function $(id) { return document.getElementById(id); }
+
+function findManga(id) {
+    return MANGA_DATA.find(function(m) { return m.id === id; });
+}
+
+function lastChapter(manga) {
+    // Chapters are newest first and numbered 1..N
+    return manga.chapters[0].number;
+}
+
+function normalize(s) {
+    return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
+
 function formatViews(n) {
-    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
-    if (n >= 1000) return (n / 1000).toFixed(0) + 'K';
-    return n.toString();
+    if (n >= 1000000) return (n / 1000000).toFixed(1).replace('.', ',') + ' mi';
+    if (n >= 1000) return Math.round(n / 1000) + ' mil';
+    return String(n);
+}
+
+function daysSince(dateStr) {
+    var today = new Date();
+    today.setHours(12, 0, 0, 0);
+    return Math.round((today - new Date(dateStr + 'T12:00:00')) / 86400000);
 }
 
 function timeAgo(dateStr) {
-    var now = new Date();
-    var date = new Date(dateStr + 'T12:00:00');
-    var days = Math.floor((now - date) / (1000 * 60 * 60 * 24));
-    if (days === 0) return 'Hoje';
+    var days = daysSince(dateStr);
+    if (days <= 0) return 'Hoje';
     if (days === 1) return 'Ontem';
-    if (days < 7) return days + 'd atrás';
-    if (days < 30) return Math.floor(days / 7) + 'sem atrás';
-    if (days < 365) return Math.floor(days / 30) + 'meses atrás';
-    return Math.floor(days / 365) + 'ano(s) atrás';
+    if (days < 7) return 'Há ' + days + ' dias';
+    if (days < 30) { var w = Math.floor(days / 7); return 'Há ' + w + (w > 1 ? ' semanas' : ' semana'); }
+    if (days < 365) { var m = Math.floor(days / 30); return 'Há ' + m + (m > 1 ? ' meses' : ' mês'); }
+    var y = Math.floor(days / 365);
+    return 'Há ' + y + (y > 1 ? ' anos' : ' ano');
 }
 
-function getCoverFallback(title) {
-    return 'https://via.placeholder.com/300x400/1a1a2e/7c3aed?text=' + encodeURIComponent(title.substring(0, 15));
+function formatDate(dateStr) {
+    return new Date(dateStr + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-function getFallbackSmall(title) {
-    return 'https://via.placeholder.com/50x70/1a1a2e/7c3aed?text=' + encodeURIComponent(title.substring(0, 10));
+// Covers come from an external CDN; draw a local placeholder when one fails.
+function coverFallback(img) {
+    img.onerror = null;
+    var text = (img.alt || '漫').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    var size = Math.min(28, Math.floor(480 / Math.max(text.length, 1)));
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400">' +
+        '<rect width="300" height="400" fill="#212228"/>' +
+        '<text x="150" y="200" fill="#ffd60a" font-family="sans-serif" font-weight="700" font-size="' + size + '" text-anchor="middle">' + text + '</text></svg>';
+    img.src = 'data:image/svg+xml,' + encodeURIComponent(svg);
+}
+
+function coverImg(manga, alt) {
+    return '<img src="' + manga.cover + '" alt="' + (alt ? manga.title : '') + '" loading="lazy" onerror="coverFallback(this)">';
+}
+
+function searchMangas(query) {
+    var q = normalize(query.trim());
+    return MANGA_DATA.filter(function(m) {
+        return [m.title, m.altTitle, m.author, m.artist].concat(m.genres).some(function(s) {
+            return normalize(s).indexOf(q) !== -1;
+        });
+    });
 }
 
 function getRecentChapters(limit) {
-    if (!limit) limit = 20;
     var all = [];
     MANGA_DATA.forEach(function(manga) {
-        // Chapters are newest first, take first 5
-        var recentChs = manga.chapters.slice(0, 5);
-        recentChs.forEach(function(ch) {
-            all.push({ number: ch.number, date: ch.date, mangaId: manga.id, mangaTitle: manga.title, cover: manga.cover });
+        manga.chapters.slice(0, 5).forEach(function(ch) {
+            all.push({ number: ch.number, date: ch.date, manga: manga });
         });
     });
-    all.sort(function(a, b) { return new Date(b.date) - new Date(a.date); });
+    all.sort(function(a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
     return all.slice(0, limit);
 }
 
-function getRecentDate(manga) {
-    // Chapters are sorted newest first (highest number first)
-    return manga.chapters[0].date;
+function byLatest(a, b) {
+    return a.chapters[0].date < b.chapters[0].date ? 1 : a.chapters[0].date > b.chapters[0].date ? -1 : 0;
 }
 
-// ===== MOBILE MENU =====
-function toggleMobileMenu() {
-    var menu = document.getElementById('mobileMenu');
-    menu.classList.toggle('open');
+// ===== FAVORITES & PROGRESS =====
+function isFavorite(id) { return state.favorites.indexOf(id) !== -1; }
+
+function favButton(id) {
+    var on = isFavorite(id);
+    return '<button class="card-fav' + (on ? ' faved' : '') + '" data-fav="' + id + '" onclick="toggleFav(' + id + ')" ' +
+        'aria-pressed="' + on + '" aria-label="' + (on ? 'Remover dos favoritos' : 'Adicionar aos favoritos') + '">' + HEART + '</button>';
 }
 
-function closeMobileMenu() {
-    document.getElementById('mobileMenu').classList.remove('open');
-}
+function toggleFav(id) {
+    var idx = state.favorites.indexOf(id);
+    if (idx === -1) state.favorites.push(id); else state.favorites.splice(idx, 1);
+    save('mangaFavs', state.favorites);
 
-// ===== SEARCH DROPDOWN =====
-function showSearchDropdown(query) {
-    var dropdown = document.getElementById('searchDropdown');
-    var q = query.trim().toLowerCase();
-    if (!q) { dropdown.classList.remove('show'); return; }
-
-    var results = MANGA_DATA.filter(function(m) {
-        return m.title.toLowerCase().indexOf(q) !== -1 ||
-               m.altTitle.toLowerCase().indexOf(q) !== -1 ||
-               m.author.toLowerCase().indexOf(q) !== -1 ||
-               m.genres.some(function(g) { return g.toLowerCase().indexOf(q) !== -1; });
-    }).slice(0, 6);
-
-    if (results.length === 0) { dropdown.classList.remove('show'); return; }
-
-    dropdown.innerHTML = results.map(function(m) {
-        return '<div class="search-dropdown-item" onclick="openManga(' + m.id + '); closeSearchDropdown();">' +
-            '<img src="' + m.cover + '" alt="" onerror="this.src=\'' + getFallbackSmall(m.title) + '\'">' +
-            '<div class="sd-info">' +
-                '<h4>' + m.title + '</h4>' +
-                '<p>' + m.author + ' &#8226; ' + m.genres.slice(0, 2).join(', ') + '</p>' +
-            '</div>' +
-        '</div>';
-    }).join('');
-
-    dropdown.classList.add('show');
-}
-
-function closeSearchDropdown() {
-    document.getElementById('searchDropdown').classList.remove('show');
-}
-
-function handleSearchInput(query) {
-    clearTimeout(state.searchTimeout);
-    state.searchTimeout = setTimeout(function() {
-        showSearchDropdown(query);
-        var q = query.trim().toLowerCase();
-        if (!q) {
-            if (state.currentPage === 'search') navigate('home');
-            return;
-        }
-
-        var results = MANGA_DATA.filter(function(m) {
-            return m.title.toLowerCase().indexOf(q) !== -1 ||
-                   m.altTitle.toLowerCase().indexOf(q) !== -1 ||
-                   m.author.toLowerCase().indexOf(q) !== -1 ||
-                   m.genres.some(function(g) { return g.toLowerCase().indexOf(q) !== -1; });
-        });
-
-        document.getElementById('searchQuery').textContent = query.trim();
-        document.getElementById('searchCount').textContent = results.length + ' resultado(s) encontrado(s)';
-
-        var el = document.getElementById('searchGrid');
-        var empty = document.getElementById('emptySearch');
-
-        if (results.length === 0) {
-            el.style.display = 'none';
-            empty.style.display = 'block';
+    var on = isFavorite(id);
+    document.querySelectorAll('[data-fav="' + id + '"]').forEach(function(btn) {
+        btn.classList.toggle('faved', on);
+        btn.setAttribute('aria-pressed', on);
+        if (btn.classList.contains('card-fav')) {
+            btn.setAttribute('aria-label', on ? 'Remover dos favoritos' : 'Adicionar aos favoritos');
         } else {
-            el.style.display = '';
-            empty.style.display = 'none';
-            el.innerHTML = results.map(function(m) { return createMangaCard(m); }).join('');
+            btn.lastChild.textContent = on ? ' Favoritado' : ' Favoritar';
         }
+    });
+    updateFavCount();
+    if (currentRoute()[0] === 'favorites') renderFavorites();
+}
 
-        if (state.currentPage !== 'search') {
-            state.navHistory.push(state.currentPage);
-            state.currentPage = 'search';
-            document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
-            document.getElementById('page-search').classList.add('active');
-        }
-    }, 250);
+function updateFavCount() {
+    $('favCount').textContent = state.favorites.length || '';
+}
+
+function markRead(id, ch) {
+    var p = state.progress[id] || (state.progress[id] = { ch: ch, t: 0, read: [] });
+    p.ch = ch;
+    p.t = Date.now();
+    if (p.read.indexOf(ch) === -1) p.read.push(ch);
+    save('mangaProgress', state.progress);
 }
 
 // ===== MANGA CARD =====
 function createMangaCard(manga) {
-    var isFav = state.favorites.indexOf(manga.id) !== -1;
     var badge = '';
-    if (manga.badge === 'hot') {
-        badge = '<span class="card-badge hot">HOT</span>';
-    } else if (manga.badge === 'new') {
-        badge = '<span class="card-badge new">NOVO</span>';
-    }
-    return '<div class="manga-card" onclick="openManga(' + manga.id + ')">' +
+    if (manga.badge === 'hot') badge = '<span class="card-badge hot">Em alta</span>';
+    else if (manga.badge === 'new') badge = '<span class="card-badge new">Novo</span>';
+    var p = state.progress[manga.id];
+
+    return '<article class="manga-card">' +
         '<div class="card-cover">' +
-            '<img src="' + manga.cover + '" alt="' + manga.title + '" loading="lazy" onerror="this.src=\'' + getCoverFallback(manga.title) + '\'">' +
+            coverImg(manga, true) +
             badge +
-            '<button class="card-fav ' + (isFav ? 'faved' : '') + '" onclick="toggleFav(event, ' + manga.id + ')" title="Favoritar">' +
-                (isFav ? '&#10084;' : '&#9825;') +
-            '</button>' +
+            (p ? '<span class="card-progress">Parou no cap. ' + p.ch + '</span>' : '') +
         '</div>' +
         '<div class="card-info">' +
-            '<h3>' + manga.title + '</h3>' +
+            '<h3><a class="card-link" href="#/manga/' + manga.id + '">' + manga.title + '</a></h3>' +
             '<div class="card-meta">' +
-                '<span class="card-rating">&#9733; ' + manga.rating + '</span>' +
-                '<span class="card-latest">Cap. ' + manga.chapters.length + '</span>' +
+                '<span class="card-rating">&#9733; ' + manga.rating.toFixed(1) + '</span>' +
+                '<span>Cap. ' + lastChapter(manga) + '</span>' +
             '</div>' +
         '</div>' +
-    '</div>';
+        favButton(manga.id) +
+    '</article>';
 }
 
-// ===== NAVIGATION =====
-function navigate(page) {
-    closeSearchDropdown();
+function renderGrid(gridId, emptyId, list) {
+    $(gridId).innerHTML = list.map(createMangaCard).join('');
+    $(gridId).hidden = list.length === 0;
+    if (emptyId) $(emptyId).hidden = list.length !== 0;
+}
 
-    if (state.currentPage !== page && state.currentPage !== '') {
-        state.navHistory.push(state.currentPage);
-    }
-    state.currentPage = page;
+// ===== ROUTING =====
+// #/  #/popular  #/recent  #/favorites  #/busca/<q>  #/manga/<id>  #/ler/<id>/<cap>
+function currentRoute() {
+    return location.hash.replace(/^#\/?/, '').split('/');
+}
 
-    document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
-    var target = document.getElementById('page-' + page);
-    if (target) target.classList.add('active');
+function replaceHash(hash) {
+    state.replacing = true;
+    location.replace(hash);
+}
 
-    document.querySelectorAll('.nav-links a').forEach(function(a) { a.classList.remove('active'); });
-    var link = document.querySelector('.nav-links a[data-page="' + page + '"]');
-    if (link) link.classList.add('active');
+function goBack(fallback) {
+    if (state.navCount > 0) history.back();
+    else replaceHash(fallback);
+}
+
+function route() {
+    var parts = currentRoute();
+    var page = parts[0] || 'home';
+    var input = $('searchInput');
+    closeMobileMenu();
 
     switch (page) {
-        case 'home': renderHome(); break;
         case 'popular': renderPopular(); break;
         case 'recent': renderRecent(); break;
         case 'favorites': renderFavorites(); break;
+        case 'busca':
+            var q = decodeURIComponent(parts.slice(1).join('/'));
+            if (!q.trim()) return replaceHash('#/');
+            if (document.activeElement !== input) input.value = q;
+            renderSearch(q);
+            break;
+        case 'manga':
+            if (!renderDetail(+parts[1])) return replaceHash('#/');
+            break;
+        case 'ler':
+            if (!openReader(+parts[1], +parts[2])) return replaceHash('#/');
+            break;
+        default:
+            page = 'home';
+            renderHome();
     }
 
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
-function goBack() {
-    var prev = 'home';
-    if (state.navHistory.length > 0) {
-        prev = state.navHistory.pop();
-        // Skip if previous page is the same as current
-        if (prev === state.currentPage && state.navHistory.length > 0) {
-            prev = state.navHistory.pop();
-        }
-    }
-    // Don't push to history when going back
-    var savedPage = state.currentPage;
-    state.currentPage = prev;
-    state.navHistory = state.navHistory.filter(function(p) { return p !== savedPage; });
-
-    document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
-    var target = document.getElementById('page-' + prev);
-    if (target) target.classList.add('active');
-
-    document.querySelectorAll('.nav-links a').forEach(function(a) { a.classList.remove('active'); });
-    var link = document.querySelector('.nav-links a[data-page="' + prev + '"]');
-    if (link) link.classList.add('active');
-
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (page !== 'busca') input.value = '';
+    document.querySelectorAll('.page').forEach(function(p) {
+        p.classList.toggle('active', p.id === 'page-' + page);
+    });
+    document.querySelectorAll('.nav-links a').forEach(function(a) {
+        var active = a.getAttribute('data-page') === page;
+        a.classList.toggle('active', active);
+        if (active) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    });
+    document.body.classList.toggle('reading', page === 'ler');
+    if (page === 'ler') updateReaderProgress(); // needs the page visible to measure
 }
 
 // ===== HOME =====
 function renderHome() {
-    document.getElementById('totalMangas').textContent = MANGA_DATA.length;
-    var totalCh = 0;
-    MANGA_DATA.forEach(function(m) { totalCh += m.chapters.length; });
-    document.getElementById('totalChapters').textContent = formatViews(totalCh);
-
-    renderGenreFilters();
-    renderFeatured();
+    var byViews = MANGA_DATA.slice().sort(function(a, b) { return b.views - a.views; });
+    renderHero(byViews[0]);
+    renderContinue();
+    renderFeatured(byViews.slice(1, 9));
     renderLatest();
+    renderGenreFilters();
     renderAllMangas();
 }
 
+function renderHero(m) {
+    var p = state.progress[m.id];
+    var totalCh = 0;
+    MANGA_DATA.forEach(function(x) { totalCh += x.chapters.length; });
+
+    $('hero').innerHTML =
+        '<div class="backdrop"><div class="backdrop-img" style="background-image:url(\'' + m.cover + '\')"></div></div>' +
+        '<div class="container hero-inner">' +
+            '<div class="hero-text">' +
+                '<p class="eyebrow">Nº 1 em leituras</p>' +
+                '<h1>' + m.title + '</h1>' +
+                '<p class="hero-alt">' + m.altTitle + ' · ' + m.author + '</p>' +
+                '<p class="hero-desc">' + m.description + '</p>' +
+                '<div class="hero-actions">' +
+                    '<a class="btn btn-primary" href="#/ler/' + m.id + '/' + (p ? p.ch : 1) + '">' + (p ? 'Continuar cap. ' + p.ch : 'Começar a ler') + '</a>' +
+                    '<a class="btn btn-ghost" href="#/manga/' + m.id + '">Ver capítulos</a>' +
+                '</div>' +
+                '<dl class="hero-stats">' +
+                    '<div><dt>Títulos</dt><dd>' + MANGA_DATA.length + '</dd></div>' +
+                    '<div><dt>Capítulos</dt><dd>' + formatViews(totalCh) + '</dd></div>' +
+                    '<div><dt>Idioma</dt><dd>PT-BR</dd></div>' +
+                '</dl>' +
+            '</div>' +
+            '<a class="hero-cover" href="#/manga/' + m.id + '" tabindex="-1">' + coverImg(m, true) + '</a>' +
+        '</div>';
+}
+
+function renderContinue() {
+    var entries = Object.keys(state.progress).map(function(id) {
+        return { manga: findManga(+id), p: state.progress[id] };
+    }).filter(function(e) { return e.manga; });
+    entries.sort(function(a, b) { return b.p.t - a.p.t; });
+    entries = entries.slice(0, 4);
+
+    $('continueSection').hidden = entries.length === 0;
+    $('continueRow').innerHTML = entries.map(function(e) {
+        var total = lastChapter(e.manga);
+        return '<a class="continue-card" href="#/ler/' + e.manga.id + '/' + e.p.ch + '">' +
+            '<span class="continue-thumb">' + coverImg(e.manga) + '</span>' +
+            '<span class="continue-info">' +
+                '<strong>' + e.manga.title + '</strong>' +
+                '<span>Cap. ' + e.p.ch + ' de ' + total + '</span>' +
+                '<span class="bar"><span style="width:' + Math.max(2, e.p.ch / total * 100) + '%"></span></span>' +
+            '</span>' +
+        '</a>';
+    }).join('');
+}
+
+function renderFeatured(list) {
+    $('featuredCarousel').innerHTML = list.map(function(m) {
+        return '<a class="featured-card" href="#/manga/' + m.id + '">' +
+            coverImg(m) +
+            '<span class="featured-overlay">' +
+                '<span class="featured-genres">' + m.genres.slice(0, 3).map(function(g) { return '<span>' + g + '</span>'; }).join('') + '</span>' +
+                '<strong>' + m.title + '</strong>' +
+                '<span class="featured-desc">' + m.description + '</span>' +
+            '</span>' +
+        '</a>';
+    }).join('');
+}
+
+function scrollCarousel(dir) {
+    var el = $('featuredCarousel');
+    el.scrollBy({ left: dir * el.clientWidth * 0.8, behavior: 'smooth' });
+}
+
+function renderLatest() {
+    var latest = MANGA_DATA.slice().sort(byLatest).slice(0, 6);
+    $('latestGrid').innerHTML = latest.map(function(m) {
+        return '<article class="update-item">' +
+            '<a class="update-thumb" href="#/manga/' + m.id + '" tabindex="-1">' + coverImg(m) + '</a>' +
+            '<div class="update-info">' +
+                '<h3><a href="#/manga/' + m.id + '">' + m.title + '</a></h3>' +
+                '<ul>' + m.chapters.slice(0, 3).map(function(ch) {
+                    return '<li><a href="#/ler/' + m.id + '/' + ch.number + '"><span>Cap. ' + ch.number + '</span><time datetime="' + ch.date + '">' + timeAgo(ch.date) + '</time></a></li>';
+                }).join('') + '</ul>' +
+            '</div>' +
+        '</article>';
+    }).join('');
+}
+
 function renderGenreFilters() {
-    var el = document.getElementById('genreFilters');
-    var html = '<button class="genre-btn' + (!state.selectedGenre ? ' active' : '') + '" onclick="filterGenre(null)">Todos</button>';
+    var html = '<button class="chip" aria-pressed="' + !state.selectedGenre + '" onclick="filterGenre(null)">Todos</button>';
     ALL_GENRES.forEach(function(g) {
-        html += '<button class="genre-btn' + (state.selectedGenre === g ? ' active' : '') + '" onclick="filterGenre(\'' + g + '\')">' + g + '</button>';
+        html += '<button class="chip" aria-pressed="' + (state.selectedGenre === g) + '" onclick="filterGenre(\'' + g + '\')">' + g + '</button>';
     });
-    el.innerHTML = html;
+    $('genreFilters').innerHTML = html;
 }
 
 function getFilteredMangas() {
@@ -247,56 +340,21 @@ function getFilteredMangas() {
         list = list.filter(function(m) { return m.genres.indexOf(state.selectedGenre) !== -1; });
     }
     switch (state.sortBy) {
-        case 'name':
-            list.sort(function(a, b) { return a.title.localeCompare(b.title); });
-            break;
-        case 'rating':
-            list.sort(function(a, b) { return b.rating - a.rating; });
-            break;
-        case 'views':
-            list.sort(function(a, b) { return b.views - a.views; });
-            break;
-        case 'latest':
-            list.sort(function(a, b) { return new Date(getRecentDate(b)) - new Date(getRecentDate(a)); });
-            break;
+        case 'name': list.sort(function(a, b) { return a.title.localeCompare(b.title); }); break;
+        case 'rating': list.sort(function(a, b) { return b.rating - a.rating; }); break;
+        case 'views': list.sort(function(a, b) { return b.views - a.views; }); break;
+        case 'latest': list.sort(byLatest); break;
     }
     return list;
 }
 
-function renderFeatured() {
-    var el = document.getElementById('featuredCarousel');
-    var featured = MANGA_DATA.slice().sort(function(a, b) { return b.views - a.views; }).slice(0, 6);
-    el.innerHTML = featured.map(function(m) {
-        return '<div class="featured-card" onclick="openManga(' + m.id + ')">' +
-            '<img src="' + m.cover + '" alt="' + m.title + '" loading="lazy" onerror="this.src=\'' + getCoverFallback(m.title) + '\'">' +
-            '<div class="featured-overlay">' +
-                '<h3>' + m.title + '</h3>' +
-                '<p>' + m.description.substring(0, 120) + '...</p>' +
-                '<div class="featured-genres">' +
-                    m.genres.slice(0, 3).map(function(g) { return '<span>' + g + '</span>'; }).join('') +
-                '</div>' +
-            '</div>' +
-        '</div>';
-    }).join('');
-}
-
-function scrollCarousel(dir) {
-    var el = document.getElementById('featuredCarousel');
-    el.scrollBy({ left: dir * 360, behavior: 'smooth' });
-}
-
-function renderLatest() {
-    var el = document.getElementById('latestGrid');
-    var latest = MANGA_DATA.slice().sort(function(a, b) {
-        return new Date(getRecentDate(b)) - new Date(getRecentDate(a));
-    }).slice(0, 8);
-    el.innerHTML = latest.map(function(m) { return createMangaCard(m); }).join('');
-}
-
 function renderAllMangas() {
-    var el = document.getElementById('allGrid');
     var list = getFilteredMangas();
-    el.innerHTML = list.map(function(m) { return createMangaCard(m); }).join('');
+    renderGrid('allGrid', null, list);
+    $('catalogCount').textContent = list.length + (list.length === 1 ? ' título' : ' títulos');
+    document.querySelectorAll('.sort-btn').forEach(function(btn) {
+        btn.setAttribute('aria-pressed', btn.getAttribute('data-sort') === state.sortBy);
+    });
 }
 
 function filterGenre(genre) {
@@ -307,261 +365,212 @@ function filterGenre(genre) {
 
 function handleSort(val) {
     state.sortBy = val;
-    document.querySelectorAll('.sort-btn').forEach(function(btn) {
-        btn.classList.toggle('active', btn.getAttribute('data-sort') === val);
-    });
     renderAllMangas();
 }
 
 // ===== POPULAR =====
 function renderPopular() {
-    var el = document.getElementById('popularList');
     var sorted = MANGA_DATA.slice().sort(function(a, b) { return b.views - a.views; });
-    el.innerHTML = sorted.map(function(m, i) {
-        return '<div class="ranked-item" onclick="openManga(' + m.id + ')">' +
+    $('popularList').innerHTML = sorted.map(function(m, i) {
+        return '<li><a class="ranked-item' + (i < 3 ? ' top' : '') + '" href="#/manga/' + m.id + '">' +
             '<span class="ranked-num">' + (i + 1) + '</span>' +
-            '<div class="ranked-cover">' +
-                '<img src="' + m.cover + '" alt="" loading="lazy" onerror="this.src=\'' + getFallbackSmall(m.title) + '\'">' +
-            '</div>' +
-            '<div class="ranked-info">' +
-                '<h3>' + m.title + '</h3>' +
-                '<div class="ranked-meta">' +
-                    '<span class="ranked-rating">&#9733; ' + m.rating + '</span>' +
-                    '<span>' + formatViews(m.views) + ' views</span>' +
-                    '<span>' + m.status + '</span>' +
-                    '<span>Cap. ' + m.chapters.length + '</span>' +
-                '</div>' +
-            '</div>' +
-        '</div>';
+            '<span class="ranked-cover">' + coverImg(m) + '</span>' +
+            '<span class="ranked-info">' +
+                '<strong>' + m.title + '</strong>' +
+                '<span class="ranked-meta">' +
+                    '<span>' + m.genres.slice(0, 3).join(' · ') + '</span>' +
+                    '<span>' + m.status + ' · ' + lastChapter(m) + ' caps.</span>' +
+                '</span>' +
+            '</span>' +
+            '<span class="ranked-stats">' +
+                '<span class="ranked-views">' + formatViews(m.views) + '</span>' +
+                '<span class="card-rating">&#9733; ' + m.rating.toFixed(1) + '</span>' +
+            '</span>' +
+        '</a></li>';
     }).join('');
 }
 
 // ===== RECENT =====
 function renderRecent() {
-    var el = document.getElementById('recentList');
-    var recents = getRecentChapters(20);
-    el.innerHTML = recents.map(function(ch) {
-        return '<div class="recent-item" onclick="openChapter(' + ch.mangaId + ', ' + ch.number + ')">' +
-            '<div class="recent-cover">' +
-                '<img src="' + ch.cover + '" alt="" loading="lazy" onerror="this.src=\'' + getFallbackSmall(ch.mangaTitle) + '\'">' +
-            '</div>' +
-            '<div class="recent-info">' +
-                '<h4>' + ch.mangaTitle + '</h4>' +
-                '<p>Capítulo ' + ch.number + '</p>' +
-            '</div>' +
-            '<span class="recent-time">' + timeAgo(ch.date) + '</span>' +
-        '</div>';
-    }).join('');
+    var html = '';
+    var lastLabel = '';
+    getRecentChapters(30).forEach(function(ch) {
+        var label = timeAgo(ch.date);
+        if (label !== lastLabel) {
+            html += '<h2 class="recent-day">' + label + '</h2>';
+            lastLabel = label;
+        }
+        html += '<a class="recent-item" href="#/ler/' + ch.manga.id + '/' + ch.number + '">' +
+            '<span class="recent-cover">' + coverImg(ch.manga) + '</span>' +
+            '<span class="recent-info"><strong>' + ch.manga.title + '</strong><span>Capítulo ' + ch.number + '</span></span>' +
+            '<time class="recent-time" datetime="' + ch.date + '">' + formatDate(ch.date) + '</time>' +
+        '</a>';
+    });
+    $('recentList').innerHTML = html;
 }
 
 // ===== FAVORITES =====
 function renderFavorites() {
-    var el = document.getElementById('favoritesGrid');
-    var empty = document.getElementById('emptyFavorites');
-    var favs = MANGA_DATA.filter(function(m) { return state.favorites.indexOf(m.id) !== -1; });
-    if (favs.length === 0) {
-        el.style.display = 'none';
-        empty.style.display = 'block';
-    } else {
-        el.style.display = '';
-        empty.style.display = 'none';
-        el.innerHTML = favs.map(function(m) { return createMangaCard(m); }).join('');
-    }
+    renderGrid('favoritesGrid', 'emptyFavorites', MANGA_DATA.filter(function(m) { return isFavorite(m.id); }));
+}
+
+// ===== SEARCH =====
+function renderSearch(query) {
+    var results = searchMangas(query);
+    $('searchCount').textContent = results.length + (results.length === 1 ? ' resultado' : ' resultados') + ' para “' + query.trim() + '”';
+    renderGrid('searchGrid', 'emptySearch', results);
+}
+
+function handleSearchInput(value) {
+    clearTimeout(state.searchTimeout);
+    state.searchTimeout = setTimeout(function() {
+        var q = value.trim();
+        var onSearch = currentRoute()[0] === 'busca';
+        if (q) {
+            var hash = '#/busca/' + encodeURIComponent(q);
+            if (onSearch) replaceHash(hash); else location.hash = hash;
+        } else if (onSearch) {
+            replaceHash('#/');
+        }
+    }, 200);
 }
 
 // ===== MANGA DETAIL =====
-function openManga(id) {
-    var manga = MANGA_DATA.find(function(m) { return m.id === id; });
-    if (!manga) return;
-
-    closeSearchDropdown();
+function renderDetail(id) {
+    var manga = findManga(id);
+    if (!manga) return false;
     state.currentManga = manga;
-    state.navHistory.push(state.currentPage);
-    state.currentPage = 'detail';
 
-    var isFav = state.favorites.indexOf(manga.id) !== -1;
+    var p = state.progress[manga.id];
+    var fav = isFavorite(manga.id);
+    var ongoing = manga.status === 'Em lançamento';
 
-    document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
-    document.getElementById('page-detail').classList.add('active');
-
-    var chaptersReversed = manga.chapters.slice().reverse();
-    // Chapters are newest first, so index 0 is last chapter
-    var lastCh = manga.chapters[0].number;
-    var firstCh = manga.chapters[manga.chapters.length - 1].number;
-
-    var html = '<div class="detail-cover">' +
-            '<img src="' + manga.cover + '" alt="' + manga.title + '" onerror="this.src=\'' + getCoverFallback(manga.title) + '\'">' +
-        '</div>' +
-        '<div class="detail-info">' +
-            '<h1>' + manga.title + '</h1>' +
-            '<p class="detail-alt-title">' + manga.altTitle + '</p>' +
-            '<div class="detail-meta-grid">' +
-                '<div class="detail-meta-item"><label>Autor</label><span>' + manga.author + '</span></div>' +
-                '<div class="detail-meta-item"><label>Artista</label><span>' + manga.artist + '</span></div>' +
-                '<div class="detail-meta-item"><label>Status</label><span>' + manga.status + '</span></div>' +
-                '<div class="detail-meta-item"><label>Avaliação</label><span>&#9733; ' + manga.rating + '</span></div>' +
-                '<div class="detail-meta-item"><label>Visualizações</label><span>' + formatViews(manga.views) + '</span></div>' +
-                '<div class="detail-meta-item"><label>Capítulos</label><span>' + manga.chapters.length + '</span></div>' +
-            '</div>' +
-            '<div class="detail-genres">' +
-                manga.genres.map(function(g) { return '<span>' + g + '</span>'; }).join('') +
-            '</div>' +
-            '<p class="detail-desc">' + manga.description + '</p>' +
-            '<div class="detail-actions">' +
-                '<button class="btn-primary" onclick="openChapter(' + manga.id + ', ' + firstCh + ')">Começar a Ler</button>' +
-                '<button class="btn-primary" onclick="openChapter(' + manga.id + ', ' + lastCh + ')">Último Capítulo</button>' +
-                '<button class="btn-secondary" onclick="toggleFavFromDetail(this, ' + manga.id + ')" id="detailFavBtn">' +
-                    (isFav ? '&#10084; Remover dos Favoritos' : '&#9825; Favoritar') +
-                '</button>' +
+    $('detailBackdrop').innerHTML = '<div class="backdrop-img" style="background-image:url(\'' + manga.cover + '\')"></div>';
+    $('mangaDetail').innerHTML =
+        '<div class="detail">' +
+            '<div class="detail-cover">' + coverImg(manga, true) + '</div>' +
+            '<div class="detail-info">' +
+                '<span class="status' + (ongoing ? ' ongoing' : '') + '">' + manga.status + '</span>' +
+                '<h1>' + manga.title + '</h1>' +
+                '<p class="detail-alt">' + manga.altTitle + '</p>' +
+                '<div class="detail-genres">' + manga.genres.map(function(g) { return '<span>' + g + '</span>'; }).join('') + '</div>' +
+                '<p class="detail-desc">' + manga.description + '</p>' +
+                '<div class="detail-actions">' +
+                    '<a class="btn btn-primary" href="#/ler/' + manga.id + '/' + (p ? p.ch : 1) + '">' + (p ? 'Continuar cap. ' + p.ch : 'Começar pelo cap. 1') + '</a>' +
+                    '<a class="btn btn-ghost" href="#/ler/' + manga.id + '/' + lastChapter(manga) + '">Último: cap. ' + lastChapter(manga) + '</a>' +
+                    '<button class="btn btn-ghost fav-btn' + (fav ? ' faved' : '') + '" data-fav="' + manga.id + '" aria-pressed="' + fav + '" onclick="toggleFav(' + manga.id + ')">' +
+                        HEART + '<span>' + (fav ? ' Favoritado' : ' Favoritar') + '</span>' +
+                    '</button>' +
+                '</div>' +
+                '<dl class="detail-meta">' +
+                    '<div><dt>Autor</dt><dd>' + manga.author + '</dd></div>' +
+                    '<div><dt>Arte</dt><dd>' + manga.artist + '</dd></div>' +
+                    '<div><dt>Nota</dt><dd class="card-rating">&#9733; ' + manga.rating.toFixed(1) + '</dd></div>' +
+                    '<div><dt>Leituras</dt><dd>' + formatViews(manga.views) + '</dd></div>' +
+                    '<div><dt>Capítulos</dt><dd>' + manga.chapters.length + '</dd></div>' +
+                    '<div><dt>Atualizado</dt><dd>' + timeAgo(manga.chapters[0].date) + '</dd></div>' +
+                '</dl>' +
             '</div>' +
         '</div>' +
-        '<div class="chapter-list">' +
+        '<section class="chapter-section">' +
             '<div class="chapter-header">' +
-                '<h2>Capítulos (' + manga.chapters.length + ')</h2>' +
-                '<button class="chapter-toggle" onclick="toggleChapterList()">' +
-                    (state.chaptersExpanded ? 'Recolher' : 'Expandir') +
-                '</button>' +
+                '<h2>Capítulos <span class="section-count">' + manga.chapters.length + (p ? ' · ' + p.read.length + ' lidos' : '') + '</span></h2>' +
+                '<div class="chapter-tools">' +
+                    '<input type="number" id="chapterJump" min="1" max="' + lastChapter(manga) + '" placeholder="Ir para nº" aria-label="Filtrar por número do capítulo" oninput="renderChapterItems()" onkeydown="if (event.key === \'Enter\') jumpToTypedChapter()">' +
+                    '<button class="btn btn-ghost btn-sm" id="chapterOrderBtn" onclick="toggleChapterOrder()"></button>' +
+                '</div>' +
             '</div>' +
-            '<div class="chapter-list-scroll" id="chapterListScroll">' +
-                chaptersReversed.map(function(ch) {
-                    return '<div class="chapter-item" onclick="openChapter(' + manga.id + ', ' + ch.number + ')">' +
-                        '<span class="ch-title">Capítulo ' + ch.number + '</span>' +
-                        '<span class="ch-date">' + ch.date + '</span>' +
-                    '</div>';
-                }).join('') +
-            '</div>' +
-        '</div>';
+            '<ol class="chapter-items" id="chapterItems"></ol>' +
+        '</section>';
 
-    document.getElementById('mangaDetail').innerHTML = html;
-
-    if (!state.chaptersExpanded) {
-        var scroll = document.getElementById('chapterListScroll');
-        if (scroll) scroll.style.display = 'none';
-    }
-
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    renderChapterItems();
+    return true;
 }
 
-function toggleChapterList() {
-    state.chaptersExpanded = !state.chaptersExpanded;
-    var scroll = document.getElementById('chapterListScroll');
-    if (scroll) scroll.style.display = state.chaptersExpanded ? '' : 'none';
-    var btns = document.querySelectorAll('.chapter-toggle');
-    btns.forEach(function(b) { b.textContent = state.chaptersExpanded ? 'Recolher' : 'Expandir'; });
+function renderChapterItems() {
+    var manga = state.currentManga;
+    var p = state.progress[manga.id];
+    var filter = ($('chapterJump').value || '').trim();
+    var list = state.chapterOrderDesc ? manga.chapters : manga.chapters.slice().reverse();
+    if (filter) list = list.filter(function(ch) { return String(ch.number).indexOf(filter) === 0; });
+
+    $('chapterOrderBtn').textContent = state.chapterOrderDesc ? 'Mais novos primeiro' : 'Mais antigos primeiro';
+    $('chapterItems').innerHTML = list.length ? list.map(function(ch) {
+        var cls = 'chapter-item';
+        var tag = '';
+        if (p && p.ch === ch.number) { cls += ' current'; tag = '<span class="ch-tag">Parou aqui</span>'; }
+        else if (p && p.read.indexOf(ch.number) !== -1) { cls += ' read'; tag = '<span class="ch-tag">Lido</span>'; }
+        return '<li><a class="' + cls + '" href="#/ler/' + manga.id + '/' + ch.number + '">' +
+            '<span class="ch-title">Cap. ' + ch.number + tag + '</span>' +
+            '<time class="ch-date" datetime="' + ch.date + '">' + formatDate(ch.date) + '</time>' +
+        '</a></li>';
+    }).join('') : '<li class="chapter-empty">Nenhum capítulo com esse número.</li>';
 }
 
-// ===== FAVORITES =====
-function toggleFav(event, id) {
-    event.stopPropagation();
-    var idx = state.favorites.indexOf(id);
-    if (idx === -1) {
-        state.favorites.push(id);
-    } else {
-        state.favorites.splice(idx, 1);
-    }
-    localStorage.setItem('mangaFavs', JSON.stringify(state.favorites));
-    refreshCurrentPage();
+function toggleChapterOrder() {
+    state.chapterOrderDesc = !state.chapterOrderDesc;
+    renderChapterItems();
 }
 
-function toggleFavFromDetail(btn, id) {
-    var idx = state.favorites.indexOf(id);
-    if (idx === -1) {
-        state.favorites.push(id);
-        btn.innerHTML = '&#10084; Remover dos Favoritos';
-    } else {
-        state.favorites.splice(idx, 1);
-        btn.innerHTML = '&#9825; Favoritar';
-    }
-    localStorage.setItem('mangaFavs', JSON.stringify(state.favorites));
-}
-
-function refreshCurrentPage() {
-    switch (state.currentPage) {
-        case 'home': renderHome(); break;
-        case 'popular': renderPopular(); break;
-        case 'favorites': renderFavorites(); break;
-    }
+function jumpToTypedChapter() {
+    var n = +$('chapterJump').value;
+    if (n >= 1 && n <= lastChapter(state.currentManga)) location.hash = '#/ler/' + state.currentManga.id + '/' + n;
 }
 
 // ===== READER =====
-function openChapter(mangaId, chapterNum) {
-    var manga = MANGA_DATA.find(function(m) { return m.id === mangaId; });
-    if (!manga) return;
+function openReader(mangaId, chapterNum) {
+    var manga = findManga(mangaId);
+    if (!manga || !(chapterNum >= 1 && chapterNum <= lastChapter(manga))) return false;
 
-    closeSearchDropdown();
+    var total = lastChapter(manga);
     state.currentManga = manga;
     state.currentChapter = chapterNum;
-    state.navHistory.push(state.currentPage);
-    state.currentPage = 'reader';
+    markRead(manga.id, chapterNum);
 
-    document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
-    document.getElementById('page-reader').classList.add('active');
+    var link = $('readerMangaLink');
+    link.textContent = manga.title;
+    link.href = '#/manga/' + manga.id;
+    $('readerChapter').textContent = 'Capítulo ' + chapterNum;
+    document.title = manga.title + ' – Cap. ' + chapterNum + ' | Manga Reader';
 
-    renderReader();
-}
-
-function renderReader() {
-    var manga = state.currentManga;
-    if (!manga) return;
-
-    var chapter = manga.chapters.find(function(c) { return c.number === state.currentChapter; });
-    if (!chapter) return;
-
-    document.getElementById('readerTitle').textContent = manga.title + ' - Cap. ' + state.currentChapter;
-
-    // Build chapter select (show last 10 chapters + current if not in range)
-    var select = document.getElementById('chapterSelect');
-    var totalCh = manga.chapters.length;
-    var startCh = Math.max(1, totalCh - 49); // Show last 50 chapters for performance
-    var opts = '';
-
-    if (startCh > 1) {
-        opts += '<option value="' + (startCh - 1) + '">...</option>';
+    var select = $('chapterSelect');
+    if (select.getAttribute('data-manga') !== String(manga.id)) {
+        var opts = '';
+        for (var i = total; i >= 1; i--) opts += '<option value="' + i + '">Cap. ' + i + '</option>';
+        select.innerHTML = opts;
+        select.setAttribute('data-manga', manga.id);
     }
+    select.value = chapterNum;
 
-    for (var i = startCh; i <= totalCh; i++) {
-        opts += '<option value="' + i + '"' + (i === state.currentChapter ? ' selected' : '') + '>Cap. ' + i + '</option>';
-    }
-    select.innerHTML = opts;
+    $('prevChapterBtn').disabled = $('readerPrevBtn').disabled = chapterNum <= 1;
+    $('nextChapterBtn').disabled = $('readerNextBtn').disabled = chapterNum >= total;
+    $('readerEndLabel').innerHTML = chapterNum >= total
+        ? 'Fim do capítulo ' + chapterNum + '. <strong>Você está em dia!</strong>'
+        : 'Fim do capítulo ' + chapterNum + '.';
 
-    // Update nav buttons based on reading order (by chapter number)
-    var allNums = manga.chapters.map(function(c) { return c.number; });
-    var maxCh = allNums.length > 0 ? Math.max.apply(null, allNums) : 0;
-    var minCh = allNums.length > 0 ? Math.min.apply(null, allNums) : 0;
-
-    document.getElementById('prevChapterBtn').disabled = state.currentChapter <= minCh;
-    document.getElementById('nextChapterBtn').disabled = state.currentChapter >= maxCh;
-
-    var readerPrevBtn = document.getElementById('readerPrevBtn');
-    var readerNextBtn = document.getElementById('readerNextBtn');
-
-    if (readerPrevBtn) readerPrevBtn.disabled = state.currentChapter <= minCh;
-    if (readerNextBtn) readerNextBtn.disabled = state.currentChapter >= maxCh;
-
-    // Draw manga-style pages on canvas
     drawReaderPages();
+    return true;
 }
 
-function drawReaderPages() {
-    var container = document.getElementById('readerContainer');
-    container.innerHTML = '';
-
-    var numPages = 10 + Math.floor(Math.random() * 6);
+function goToChapter(n) {
     var manga = state.currentManga;
+    if (!manga || n < 1 || n > lastChapter(manga)) return;
+    replaceHash('#/ler/' + manga.id + '/' + n);
+}
 
-    // Seed random based on chapter for consistent pages
-    var seed = manga.id * 10000 + state.currentChapter;
+function prevChapter() { goToChapter(state.currentChapter - 1); }
+function nextChapter() { goToChapter(state.currentChapter + 1); }
 
-    for (var p = 0; p < numPages; p++) {
-        var canvas = document.createElement('canvas');
-        canvas.className = 'reader-page';
-        canvas.width = 800;
-        canvas.height = 1200;
-        container.appendChild(canvas);
-
-        var ctx = canvas.getContext('2d');
-        drawMangaPage(ctx, 800, 1200, seed + p);
-    }
+function updateReaderProgress() {
+    var container = $('readerContainer');
+    var pages = container.children.length;
+    if (!pages) return;
+    var top = container.getBoundingClientRect().top;
+    var height = container.offsetHeight;
+    var seen = Math.min(Math.max((window.innerHeight - top) / height, 0), 1);
+    var page = Math.min(pages, Math.max(1, Math.ceil((window.innerHeight / 2 - top) / (height / pages))));
+    $('readerProgress').style.width = (seen * 100) + '%';
+    $('readerPageCount').textContent = page + ' / ' + pages;
 }
 
 function seededRandom(seed) {
@@ -569,100 +578,104 @@ function seededRandom(seed) {
     return x - Math.floor(x);
 }
 
-function drawMangaPage(ctx, w, h, seed) {
-    // Background
+function drawReaderPages() {
+    var container = $('readerContainer');
+    container.innerHTML = '';
+
+    var seed = state.currentManga.id * 10000 + state.currentChapter;
+    var numPages = 10 + Math.floor(seededRandom(seed * 7) * 6);
+
+    for (var p = 0; p < numPages; p++) {
+        var canvas = document.createElement('canvas');
+        canvas.className = 'reader-page';
+        canvas.width = 800;
+        canvas.height = 1200;
+        canvas.setAttribute('role', 'img');
+        canvas.setAttribute('aria-label', 'Página ' + (p + 1) + ' de ' + numPages);
+        container.appendChild(canvas);
+        drawMangaPage(canvas.getContext('2d'), 800, 1200, seed * 100 + p, p + 1);
+    }
+}
+
+function drawMangaPage(ctx, w, h, seed, pageNum) {
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, w, h);
 
-    // Page number (small, bottom)
     ctx.fillStyle = '#999';
-    ctx.font = '10px sans-serif';
+    ctx.font = '14px sans-serif';
     ctx.textAlign = 'center';
-    var pageNum = Math.floor(seededRandom(seed) * 15) + 1;
-    ctx.fillText(pageNum, w / 2, h - 12);
+    ctx.fillText(pageNum, w / 2, h - 20);
 
-    // Define panel layouts
     var layouts = [
-        // Full page single panel
-        [[0, 0, w, h * 0.9]],
-        // Two equal panels stacked
-        [[20, 20, w - 40, h * 0.42], [20, h * 0.5 + 20, w - 40, h * 0.42]],
-        // Three panels - large top, two small bottom
-        [[20, 20, w - 40, h * 0.45], [20, h * 0.52, w * 0.48 - 30, h * 0.38], [w * 0.52 + 10, h * 0.52, w * 0.48 - 30, h * 0.38]],
-        // Four panels in grid
-        [[20, 20, w * 0.48 - 30, h * 0.42], [w * 0.52 + 10, 20, w * 0.48 - 30, h * 0.42],
-         [20, h * 0.5, w * 0.48 - 30, h * 0.42], [w * 0.52 + 10, h * 0.5, w * 0.48 - 30, h * 0.42]],
-        // Two wide panels
-        [[20, 20, w - 40, h * 0.35], [20, h * 0.42, w - 40, h * 0.5]],
+        // Full page splash
+        [[30, 30, w - 60, h - 90]],
+        // Two stacked
+        [[30, 30, w - 60, h * 0.45 - 30], [30, h * 0.45 + 15, w - 60, h * 0.55 - 75]],
+        // Big top, two bottom
+        [[30, 30, w - 60, h * 0.45], [30, h * 0.45 + 45, w * 0.5 - 45, h * 0.55 - 105], [w * 0.5 + 15, h * 0.45 + 45, w * 0.5 - 45, h * 0.55 - 105]],
+        // Four grid
+        [[30, 30, w * 0.5 - 45, h * 0.5 - 45], [w * 0.5 + 15, 30, w * 0.5 - 45, h * 0.5 - 45],
+         [30, h * 0.5 + 15, w * 0.5 - 45, h * 0.5 - 75], [w * 0.5 + 15, h * 0.5 + 15, w * 0.5 - 45, h * 0.5 - 75]],
+        // Three strips
+        [[30, 30, w - 60, h * 0.3], [30, h * 0.3 + 45, w * 0.6, h * 0.35], [w * 0.6 + 45, h * 0.3 + 45, w * 0.4 - 75, h * 0.35], [30, h * 0.65 + 60, w - 60, h * 0.35 - 120]]
     ];
 
-    var layoutIdx = Math.floor(seededRandom(seed + 1) * layouts.length);
-    var panels = layouts[layoutIdx];
-
+    var panels = layouts[Math.floor(seededRandom(seed + 1) * layouts.length)];
     var panelSeed = seed + 100;
+
     panels.forEach(function(panel, idx) {
         var px = panel[0], py = panel[1], pw = panel[2], ph = panel[3];
 
-        // Panel border
-        ctx.strokeStyle = '#111';
-        ctx.lineWidth = 3;
-        ctx.strokeRect(px, py, pw, ph);
-
-        // Panel background - light gray shading
-        var shadeVal = seededRandom(panelSeed + idx * 3);
-        var shade = 220 + Math.floor(shadeVal * 35);
+        var shade = 225 + Math.floor(seededRandom(panelSeed + idx * 3) * 30);
         ctx.fillStyle = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
-        ctx.fillRect(px + 2, py + 2, pw - 4, ph - 4);
+        ctx.fillRect(px, py, pw, ph);
 
-        // Add some screentone effect
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(px, py, pw, ph);
+        ctx.clip();
+
+        // Screentone dots
         if (seededRandom(panelSeed + idx * 3 + 1) > 0.4) {
-            ctx.fillStyle = 'rgba(0,0,0,0.04)';
-            for (var dy = py + 4; dy < py + ph - 4; dy += 6) {
-                for (var dx = px + 4; dx < px + pw - 4; dx += 6) {
-                    if (seededRandom(panelSeed + dx + dy) > 0.5) {
-                        ctx.fillRect(dx, dy, 2, 2);
-                    }
+            ctx.fillStyle = 'rgba(0,0,0,0.12)';
+            for (var dy = py + 4; dy < py + ph; dy += 8) {
+                for (var dx = px + 4 + (dy / 8 % 2) * 4; dx < px + pw; dx += 8) {
+                    ctx.beginPath();
+                    ctx.arc(dx, dy, 1.6, 0, Math.PI * 2);
+                    ctx.fill();
                 }
             }
         }
 
-        // Speed lines for action scenes
+        // Speed lines
         if (seededRandom(panelSeed + idx * 3 + 2) > 0.6) {
-            ctx.save();
-            ctx.beginPath();
-            ctx.rect(px + 2, py + 2, pw - 4, ph - 4);
-            ctx.clip();
             var centerX = px + pw * (0.3 + seededRandom(panelSeed + idx * 5) * 0.4);
             var centerY = py + ph * (0.3 + seededRandom(panelSeed + idx * 5 + 1) * 0.4);
-            ctx.strokeStyle = 'rgba(0,0,0,0.08)';
-            ctx.lineWidth = 1;
-            for (var a = 0; a < 30; a++) {
+            ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+            ctx.lineWidth = 1.5;
+            for (var a = 0; a < 48; a++) {
                 var angle = seededRandom(panelSeed + idx * 7 + a) * Math.PI * 2;
-                var dist = 50 + seededRandom(panelSeed + idx * 7 + a + 100) * 400;
+                var inner = 60 + seededRandom(panelSeed + idx * 7 + a + 50) * 60;
                 ctx.beginPath();
-                ctx.moveTo(centerX + Math.cos(angle) * 30, centerY + Math.sin(angle) * 30);
-                ctx.lineTo(centerX + Math.cos(angle) * dist, centerY + Math.sin(angle) * dist);
+                ctx.moveTo(centerX + Math.cos(angle) * inner, centerY + Math.sin(angle) * inner);
+                ctx.lineTo(centerX + Math.cos(angle) * 900, centerY + Math.sin(angle) * 900);
                 ctx.stroke();
             }
-            ctx.restore();
         }
 
-        // Silhouette characters
         if (seededRandom(panelSeed + idx * 2 + 50) > 0.3) {
-            ctx.save();
-            ctx.beginPath();
-            ctx.rect(px + 2, py + 2, pw - 4, ph - 4);
-            ctx.clip();
             drawSilhouette(ctx, px, py, pw, ph, panelSeed + idx * 11);
-            ctx.restore();
         }
+        ctx.restore();
 
-        // Speech bubbles
+        // Panel border (ink)
+        ctx.strokeStyle = '#111';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(px, py, pw, ph);
+
         if (seededRandom(panelSeed + idx * 2 + 20) > 0.35) {
             drawSpeechBubble(ctx, px, py, pw, ph, panelSeed + idx * 13);
         }
-
-        // SFX text
         if (seededRandom(panelSeed + idx + 70) > 0.7) {
             drawSFX(ctx, px, py, pw, ph, panelSeed + idx * 17);
         }
@@ -670,250 +683,153 @@ function drawMangaPage(ctx, w, h, seed) {
 }
 
 function drawSilhouette(ctx, px, py, pw, ph, seed) {
-    var cx = px + pw * (0.3 + seededRandom(seed) * 0.4);
-    var baseY = py + ph * 0.85;
-    var headSize = 8 + seededRandom(seed + 1) * 12;
-    var bodyH = ph * (0.3 + seededRandom(seed + 2) * 0.4);
+    var figures = seededRandom(seed + 10) > 0.5 ? 2 : 1;
+    for (var f = 0; f < figures; f++) {
+        var cx = px + pw * (0.25 + seededRandom(seed + f * 3) * 0.5);
+        var scale = f === 0 ? 1 : 0.75;
+        var baseY = py + ph;
+        var headSize = (ph * 0.08 + 10) * scale;
+        var bodyH = ph * (0.35 + seededRandom(seed + 2 + f) * 0.25) * scale;
 
-    ctx.fillStyle = 'rgba(0,0,0,0.15)';
-
-    // Head
-    ctx.beginPath();
-    ctx.arc(cx, baseY - bodyH - headSize, headSize, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Body
-    ctx.beginPath();
-    ctx.moveTo(cx - headSize * 0.8, baseY - bodyH);
-    ctx.lineTo(cx + headSize * 0.8, baseY - bodyH);
-    ctx.lineTo(cx + headSize * 1.2, baseY);
-    ctx.lineTo(cx - headSize * 1.2, baseY);
-    ctx.fill();
-
-    // Extra character
-    if (seededRandom(seed + 10) > 0.5) {
-        var cx2 = px + pw * (0.2 + seededRandom(seed + 11) * 0.6);
-        var scale = 0.7 + seededRandom(seed + 12) * 0.5;
-        ctx.fillStyle = 'rgba(0,0,0,0.1)';
+        ctx.fillStyle = f === 0 ? 'rgba(0,0,0,0.78)' : 'rgba(0,0,0,0.35)';
         ctx.beginPath();
-        ctx.arc(cx2, baseY - bodyH * scale - headSize * scale, headSize * scale, 0, Math.PI * 2);
+        ctx.arc(cx, baseY - bodyH - headSize, headSize, 0, Math.PI * 2);
         ctx.fill();
         ctx.beginPath();
-        ctx.moveTo(cx2 - headSize * 0.8 * scale, baseY - bodyH * scale);
-        ctx.lineTo(cx2 + headSize * 0.8 * scale, baseY - bodyH * scale);
-        ctx.lineTo(cx2 + headSize * 1.2 * scale, baseY);
-        ctx.lineTo(cx2 - headSize * 1.2 * scale, baseY);
+        ctx.moveTo(cx - headSize * 0.9, baseY - bodyH);
+        ctx.lineTo(cx + headSize * 0.9, baseY - bodyH);
+        ctx.lineTo(cx + headSize * 1.6, baseY);
+        ctx.lineTo(cx - headSize * 1.6, baseY);
         ctx.fill();
     }
 }
 
 function drawSpeechBubble(ctx, px, py, pw, ph, seed) {
-    var bx = px + 20 + seededRandom(seed) * (pw - 160);
-    var by = py + 15 + seededRandom(seed + 1) * (ph * 0.4);
-    var bw = 80 + seededRandom(seed + 2) * 120;
-    var bh = 30 + seededRandom(seed + 3) * 30;
+    var phrases = [
+        'Não é possível!', 'Vamos lá!', 'Eu prometi...',
+        'O quê?!', 'Não desista!', 'Inacreditável...',
+        'Agora é minha vez!', 'Isso é poder!', 'Você é forte.',
+        'Chega!', 'Observe bem...', 'Não me subestime!',
+        'Sério?!', 'HAHAHA!', 'Fica atrás de mim!',
+        'Impossível!', 'Gaaaaah!', 'Ainda não acabou...',
+        'Conseguimos!', 'Incrível...', 'Hã?!'
+    ];
+    var phrase = phrases[Math.floor(seededRandom(seed + 6) * phrases.length)];
 
-    ctx.fillStyle = 'white';
-    ctx.strokeStyle = '#222';
-    ctx.lineWidth = 1.5;
+    ctx.font = 'bold 22px "Zen Kaku Gothic New", sans-serif';
+    var textW = ctx.measureText(phrase).width;
+    var rx = Math.min(textW / 2 + 26, pw / 2 - 20);
+    var ry = 34;
+    var cx = px + rx + 15 + seededRandom(seed) * Math.max(0, pw - rx * 2 - 30);
+    var cy = py + ry + 15 + seededRandom(seed + 1) * Math.max(0, ph * 0.35 - ry);
 
-    // Rounded rect
-    var r = 12;
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = '#111';
+    ctx.lineWidth = 2.5;
+
+    // Tail first so the ellipse covers its base
+    var tailX = cx + (seededRandom(seed + 4) - 0.5) * rx;
     ctx.beginPath();
-    ctx.moveTo(bx + r, by);
-    ctx.lineTo(bx + bw - r, by);
-    ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + r);
-    ctx.lineTo(bx + bw, by + bh - r);
-    ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - r, by + bh);
-    ctx.lineTo(bx + r, by + bh);
-    ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - r);
-    ctx.lineTo(bx, by + r);
-    ctx.quadraticCurveTo(bx, by, bx + r, by);
+    ctx.moveTo(tailX - 10, cy + ry - 6);
+    ctx.lineTo(tailX + (seededRandom(seed + 5) - 0.5) * 40, cy + ry + 26);
+    ctx.lineTo(tailX + 10, cy + ry - 6);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
 
-    // Tail
-    var tailX = bx + bw * (0.3 + seededRandom(seed + 4) * 0.4);
     ctx.beginPath();
-    ctx.moveTo(tailX - 5, by + bh);
-    ctx.lineTo(tailX, by + bh + 8 + seededRandom(seed + 5) * 8);
-    ctx.lineTo(tailX + 5, by + bh);
-    ctx.fillStyle = 'white';
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
     ctx.fill();
-
-    // Text
-    var phrases = [
-        'Nao e possivel!', 'Vamos la!', 'Eu prometi...',
-        'O que?!', 'Nao desista!', 'Inacritavel...',
-        'Agora e minha vez!', 'Isso e poder!', 'Voce e forte.',
-        'Chega!', 'Observe bem...', 'Nao me subestime!',
-        'Serio?!', 'HAHAHA!', 'Mermao!',
-        'Impossivel!', 'Gaaaaah!', 'Kuso...',
-        'Yatta!', 'Sugoi...', 'Nani?!'
-    ];
-    var phrase = phrases[Math.floor(seededRandom(seed + 6) * phrases.length)];
+    ctx.stroke();
 
     ctx.fillStyle = '#111';
-    var fontSize = Math.max(8, Math.min(12, bw / phrase.length * 1.5));
-    ctx.font = 'bold ' + fontSize + 'px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-
-    // Word wrap if too long
-    if (ctx.measureText(phrase).width > bw - 16) {
-        var words = phrase.split(' ');
-        var lines = [];
-        var line = '';
-        words.forEach(function(word) {
-            var test = line + (line ? ' ' : '') + word;
-            if (ctx.measureText(test).width > bw - 16) {
-                if (line) lines.push(line);
-                line = word;
-            } else {
-                line = test;
-            }
-        });
-        if (line) lines.push(line);
-
-        var lineH = fontSize + 3;
-        var startY = by + bh / 2 - (lines.length - 1) * lineH / 2;
-        lines.forEach(function(l, i) {
-            ctx.fillText(l, bx + bw / 2, startY + i * lineH);
-        });
-    } else {
-        ctx.fillText(phrase, bx + bw / 2, by + bh / 2);
-    }
+    ctx.fillText(phrase, cx, cy, rx * 2 - 24);
 }
 
 function drawSFX(ctx, px, py, pw, ph, seed) {
-    var sfxWords = ['DON!', 'BAM!', 'GO GO GO', 'ZUSHIN!', 'BAAAN!', 'GOGOGOGO', 'KYAAA!', 'DOOOON!'];
+    var sfxWords = ['DON!', 'BAM!', 'GOGOGO', 'ZUSHIN!', 'BAAAN!', 'ドン', 'ゴゴゴ', 'DOOOON!'];
     var sfx = sfxWords[Math.floor(seededRandom(seed) * sfxWords.length)];
-    var angle = (seededRandom(seed + 1) - 0.5) * 0.3;
-    var fontSize = 24 + Math.floor(seededRandom(seed + 2) * 20);
+    var angle = (seededRandom(seed + 1) - 0.5) * 0.5;
+    var fontSize = 48 + Math.floor(seededRandom(seed + 2) * 36);
 
     ctx.save();
-    ctx.translate(px + pw * 0.5, py + ph * 0.5);
+    ctx.translate(px + pw * 0.62, py + ph * 0.55);
     ctx.rotate(angle);
-    ctx.fillStyle = 'rgba(0,0,0,0.25)';
-    ctx.font = 'bold ' + fontSize + 'px sans-serif';
+    ctx.font = fontSize + 'px "Dela Gothic One", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(sfx, 0, 0);
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = '#fff';
+    ctx.strokeText(sfx, 0, 0, pw * 0.8);
+    ctx.fillStyle = '#111';
+    ctx.fillText(sfx, 0, 0, pw * 0.8);
     ctx.restore();
 }
 
-function jumpToChapter(num) {
-    var n = parseInt(num);
-    if (isNaN(n)) return;
-    state.currentChapter = n;
-    renderReader();
-    window.scrollTo({ top: 0 });
-}
-
-function prevChapter() {
-    // Go to lower number (previous in reading order)
-    var manga = state.currentManga;
-    if (!manga) return;
-    var cur = state.currentChapter;
-    var prev = null;
-    manga.chapters.forEach(function(c) {
-        if (c.number < cur) {
-            if (!prev || c.number > prev) prev = c.number;
-        }
-    });
-    if (prev) {
-        state.currentChapter = prev;
-        renderReader();
-        window.scrollTo({ top: 0 });
-    }
-}
-
-function nextChapter() {
-    // Go to higher number (next in reading order)
-    var manga = state.currentManga;
-    if (!manga) return;
-    var cur = state.currentChapter;
-    var next = null;
-    manga.chapters.forEach(function(c) {
-        if (c.number > cur) {
-            if (!next || c.number < next) next = c.number;
-        }
-    });
-    if (next) {
-        state.currentChapter = next;
-        renderReader();
-        window.scrollTo({ top: 0 });
-    }
-}
-
-// ===== THEME =====
+// ===== THEME & MENU =====
 function toggleTheme() {
-    var isLight = document.body.getAttribute('data-theme') === 'light';
-    document.body.setAttribute('data-theme', isLight ? 'dark' : 'light');
-    document.getElementById('themeIcon').innerHTML = isLight ? '&#9789;' : '&#9788;';
-    localStorage.setItem('mangaTheme', isLight ? 'dark' : 'light');
+    var root = document.documentElement;
+    var current = root.getAttribute('data-theme') ||
+        (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    var next = current === 'light' ? 'dark' : 'light';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem('mangaTheme', next); } catch (e) {}
 }
 
-function loadTheme() {
-    var saved = localStorage.getItem('mangaTheme');
-    if (saved === 'light') {
-        document.body.setAttribute('data-theme', 'light');
-        document.getElementById('themeIcon').innerHTML = '&#9788;';
-    }
+function toggleMobileMenu() {
+    var open = $('navLinks').classList.toggle('open');
+    $('menuBtn').setAttribute('aria-expanded', open);
 }
 
-// ===== SCROLL TO TOP =====
-function initScrollTop() {
-    var btn = document.createElement('button');
-    btn.className = 'scroll-top';
-    btn.innerHTML = '&#8593;';
-    btn.onclick = function() { window.scrollTo({ top: 0, behavior: 'smooth' }); };
-    document.body.appendChild(btn);
-
-    window.addEventListener('scroll', function() {
-        btn.classList.toggle('show', window.scrollY > 400);
-    });
-}
-
-// ===== KEYBOARD SHORTCUTS =====
-function initKeyboard() {
-    document.addEventListener('keydown', function(e) {
-        if (state.currentPage === 'reader') {
-            if (e.key === 'ArrowLeft') prevChapter();
-            if (e.key === 'ArrowRight') nextChapter();
-        }
-        // Escape goes back
-        if (e.key === 'Escape' && state.currentPage !== 'home') {
-            goBack();
-        }
-    });
-}
-
-// ===== CLOSE DROPDOWN ON OUTSIDE CLICK =====
-function initOutsideClick() {
-    document.addEventListener('click', function(e) {
-        if (!e.target.closest('.search-box')) {
-            closeSearchDropdown();
-        }
-    });
+function closeMobileMenu() {
+    $('navLinks').classList.remove('open');
+    $('menuBtn').setAttribute('aria-expanded', 'false');
 }
 
 // ===== INIT =====
-loadTheme();
-renderHome();
-initScrollTop();
-initKeyboard();
-initOutsideClick();
-
-// Bind search input
-document.getElementById('searchInput').addEventListener('input', function() {
-    handleSearchInput(this.value);
+window.addEventListener('hashchange', function() {
+    if (!state.replacing) state.navCount++;
+    state.replacing = false;
+    if (currentRoute()[0] !== 'ler') document.title = 'Manga Reader';
+    route();
+    window.scrollTo(0, 0);
 });
 
-document.getElementById('searchInput').addEventListener('keydown', function(e) {
-    if (e.key === 'Enter' && this.value.trim()) {
-        clearTimeout(state.searchTimeout);
-        handleSearchInput(this.value);
+window.addEventListener('scroll', function() {
+    $('scrollTopBtn').classList.toggle('show', window.scrollY > 600);
+    if (currentRoute()[0] === 'ler') updateReaderProgress();
+}, { passive: true });
+
+document.addEventListener('keydown', function(e) {
+    var typing = /INPUT|SELECT|TEXTAREA/.test(e.target.tagName);
+    if (typing) {
+        if (e.key === 'Escape') e.target.blur();
+        return;
+    }
+    if (e.key === '/') {
+        e.preventDefault();
+        $('searchInput').focus();
+        return;
+    }
+    var page = currentRoute()[0];
+    if (page === 'ler') {
+        if (e.key === 'ArrowLeft') prevChapter();
+        if (e.key === 'ArrowRight') nextChapter();
+        if (e.key === 'Escape') goBack('#/manga/' + state.currentManga.id);
+    } else if (e.key === 'Escape' && page) {
+        goBack('#/');
     }
 });
+
+$('searchInput').addEventListener('input', function() { handleSearchInput(this.value); });
+
+// Redraw reader pages once the display fonts arrive (canvas text uses them)
+if (document.fonts) document.fonts.ready.then(function() {
+    if (currentRoute()[0] === 'ler') drawReaderPages();
+});
+
+updateFavCount();
+route();
